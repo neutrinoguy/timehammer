@@ -20,7 +20,7 @@ import (
 
 const (
 	AppName    = "TimeHammer"
-	AppVersion = "1.0.0"
+	AppVersion = "1.0.2"
 	AppDesc    = "NTP Security Testing Tool for IoT/Embedded Devices"
 )
 
