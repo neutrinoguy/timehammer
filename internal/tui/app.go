@@ -351,7 +351,7 @@ func (a *App) createAttackPanel() {
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(ColorPrimary)
 	attackList.SetBorder(true)
-	attackList.SetTitle(" ⚔️ Available Attacks ")
+	attackList.SetTitle(" ⚔️ Available Attacks [Tab: switch] ")
 
 	availableAttacks := attacks.GetAvailableAttacks()
 	for _, attack := range availableAttacks {
@@ -387,6 +387,8 @@ func (a *App) createAttackPanel() {
   • Rollover - Test Y2K38 and NTP era bugs
   • Clock Step - Sudden large time jumps
   
+  [yellow]Press Tab[white] to switch between Attacks and Presets
+  
   [red]⚠️ Use only in controlled test environments![white]`)
 
 	// Preset list
@@ -394,7 +396,7 @@ func (a *App) createAttackPanel() {
 		SetHighlightFullLine(true).
 		SetSelectedBackgroundColor(ColorAccent)
 	presetList.SetBorder(true)
-	presetList.SetTitle(" 🎯 Attack Presets ")
+	presetList.SetTitle(" 🎯 Attack Presets [Tab: switch] ")
 
 	for _, preset := range a.cfg.AttackPresets {
 		p := preset // capture
@@ -405,6 +407,23 @@ func (a *App) createAttackPanel() {
 			a.log.Infof("ATTACK", "Applied preset: %s", p.Name)
 		})
 	}
+
+	// Handle Tab key to switch focus between lists
+	attackList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyTab {
+			a.app.SetFocus(presetList)
+			return nil
+		}
+		return event
+	})
+
+	presetList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyTab || event.Key() == tcell.KeyBacktab {
+			a.app.SetFocus(attackList)
+			return nil
+		}
+		return event
+	})
 
 	// Layout
 	leftPane := tview.NewFlex().SetDirection(tview.FlexRow).
