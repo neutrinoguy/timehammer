@@ -644,6 +644,21 @@ func (a *App) switchPage(name string) {
 	a.pages.SwitchToPage(name)
 	a.currentPage = name
 	a.updateHeader()
+
+	// Reload config when switching to config page
+	if name == "config" {
+		a.reloadConfigEditor()
+	}
+}
+
+// reloadConfigEditor reloads the current config into the editor
+func (a *App) reloadConfigEditor() {
+	yaml, err := a.cfg.GetYAML()
+	if err != nil {
+		a.log.Errorf("CONFIG", "Failed to load config: %v", err)
+		return
+	}
+	a.configEditor.SetText(yaml, true)
 }
 
 // toggleServer starts or stops the server
