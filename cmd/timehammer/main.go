@@ -95,7 +95,7 @@ func runTUI(srv *server.Server, cfg *config.Config) {
 	app := tui.NewApp(cfg, srv)
 
 	fmt.Println("\n🚀 Launching TUI...")
-	fmt.Println("   Press F10 to start server, ? for help, F12 to quit\n")
+	fmt.Println("   Press F10 to start server, ? for help, F12 to quit")
 
 	if err := app.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
@@ -122,7 +122,7 @@ func runHeadless(srv *server.Server, cfg *config.Config, log *logger.Logger) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	fmt.Println("Press Ctrl+C to stop...\n")
+	fmt.Println("Press Ctrl+C to stop...")
 
 	<-sigChan
 
