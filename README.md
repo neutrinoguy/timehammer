@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/timehammer-logo.png" alt="TimeHammer Logo" width="400">
+</p>
+
 # TimeHammer 🔨⏰
 
 A standalone, cross-platform NTP security testing tool for IoT, IIoT, and embedded device testing.
