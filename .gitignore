@@ -1,0 +1,53 @@
+# Binaries (root only)
+/timehammer
+/timehammer.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build directory
+build/
+
+# Data directory (created at runtime)
+.timehammer/
+
+# Test binaries
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Debug
+__debug_bin
+debug
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
