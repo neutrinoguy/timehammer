@@ -245,3 +245,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Chrony](https://chrony.tuxfamily.org/) - Versatile NTP implementation
 - [ntpd](https://www.ntp.org/) - Reference NTP implementation
 - [Roughtime](https://roughtime.googlesource.com/roughtime) - Secure time protocol
+
+---
+
+## 🤖 AI Credits
+
+Built with ❤️ using `Claude Opus 4.5` and Google Antigravity 🤖
