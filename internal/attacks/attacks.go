@@ -4,6 +4,7 @@ package attacks
 import (
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ const (
 	AttackLeapSecond   AttackType = "leap_second"
 	AttackRollover     AttackType = "rollover"
 	AttackClockStep    AttackType = "clock_step"
+	AttackFuzzing      AttackType = "fuzzing"
 )
 
 // AttackInfo provides information about an attack
@@ -79,6 +81,12 @@ func GetAvailableAttacks() []AttackInfo {
 			Type:        AttackClockStep,
 			Name:        "Clock Step Attack",
 			Description: "Sudden large time jumps to test client resilience to step changes",
+			Severity:    "Medium",
+		},
+		{
+			Type:        AttackFuzzing,
+			Name:        "Client Fuzzing",
+			Description: "Randomly mutates NTP fields, timestamps, and headers to test client robustness",
 			Severity:    "Medium",
 		},
 	}
@@ -162,6 +170,8 @@ func (e *AttackEngine) ProcessPacket(packet *ntpcore.NTPPacket, clientAddr strin
 		return e.applyRollover(packet)
 	case AttackClockStep:
 		return e.applyClockStep(packet, realTime, count)
+	case AttackFuzzing:
+		return e.applyFuzzing(packet)
 	default:
 		return packet, ""
 	}
@@ -445,6 +455,11 @@ func (e *AttackEngine) ApplyPreset(preset config.AttackPreset) error {
 		if interval, ok := preset.Config["interval"].(int); ok {
 			e.cfg.Security.ClockStep.Interval = interval
 		}
+	case "fuzzing":
+		e.cfg.Security.Fuzzing.Enabled = true
+		if mode, ok := preset.Config["mode"].(string); ok {
+			e.cfg.Security.Fuzzing.Mode = mode
+		}
 	}
 
 	return nil
@@ -464,4 +479,73 @@ func (e *AttackEngine) DisableAllAttacks() {
 	e.cfg.Security.LeapSecond.Enabled = false
 	e.cfg.Security.Rollover.Enabled = false
 	e.cfg.Security.ClockStep.Enabled = false
+	e.cfg.Security.Fuzzing.Enabled = false
+}
+
+// applyFuzzing applies random fuzzing mutations
+func (e *AttackEngine) applyFuzzing(packet *ntpcore.NTPPacket) (*ntpcore.NTPPacket, string) {
+	if !e.cfg.Security.Fuzzing.Enabled {
+		return packet, ""
+	}
+
+	mutationType := rand.Intn(10)
+	mutationName := "Generic Fuzzing"
+
+	switch mutationType {
+	case 0: // Version Fuzzing
+		v := uint8(rand.Intn(8))
+		if v == 3 || v == 4 {
+			// Try to pick an invalid one again
+			v = uint8(rand.Intn(8))
+		}
+		packet.Version = v
+		mutationName = fmt.Sprintf("Fuzz: Version %d", v)
+	case 1: // Mode Fuzzing
+		m := uint8(rand.Intn(8))
+		if m == 4 { // Server
+			m = 0 // Reserved
+		}
+		packet.Mode = m
+		mutationName = fmt.Sprintf("Fuzz: Mode %d", m)
+	case 2: // Stratum Fuzzing
+		s := uint8(rand.Intn(20))
+		if s == 0 {
+			s = 16 // Unsynced
+		} else if s > 16 {
+			s = 0 // Invalid/KoD without code
+		}
+		packet.Stratum = s
+		mutationName = fmt.Sprintf("Fuzz: Stratum %d", s)
+	case 3: // Leap Indicator
+		packet.LeapIndicator = 3 // Alarm
+		mutationName = "Fuzz: LI Alarm"
+	case 4: // Zero Timestamp
+		packet.SetReceiveTime(time.Time{})
+		packet.SetTransmitTime(time.Time{})
+		packet.SetReferenceTime(time.Time{})
+		mutationName = "Fuzz: Zero Timestamps"
+	case 5: // Max Timestamp
+		packet.RecvTimeSec = 0xFFFFFFFF
+		packet.RecvTimeFrac = 0xFFFFFFFF
+		packet.XmitTimeSec = 0xFFFFFFFF
+		packet.XmitTimeFrac = 0xFFFFFFFF
+		mutationName = "Fuzz: Max Timestamps"
+	case 6: // Root Delay/Dispersion
+		packet.RootDelay = 0xFFFF0000
+		packet.RootDisp = 0xFFFF0000
+		mutationName = "Fuzz: Large Root Delay"
+	case 7: // Reference ID
+		packet.ReferenceID = 0x41414141 // AAAA
+		mutationName = "Fuzz: RefID AAAA"
+	case 8: // Origin Timestamp Mismatch
+		packet.OrigTimeSec++
+		mutationName = "Fuzz: Origin Mismatch"
+	case 9: // Poll/Precision
+		packet.Poll = -100
+		packet.Precision = 100
+		mutationName = "Fuzz: Invalid Poll/Prec"
+	}
+
+	e.log.LogAttack(string(AttackFuzzing), "all", mutationName)
+	return packet, mutationName
 }

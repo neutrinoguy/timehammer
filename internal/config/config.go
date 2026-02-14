@@ -64,6 +64,10 @@ type ServerConfig struct {
 
 	// Enable SNTP mode (simplified responses)
 	SNTPMode bool `yaml:"sntp_mode"`
+
+	// Timezone for NTP responses (IANA timezone name, e.g. "America/New_York", "Asia/Kolkata")
+	// Default: "UTC". When set, NTP timestamps will include the UTC offset for this timezone.
+	Timezone string `yaml:"timezone"`
 }
 
 // UpstreamConfig holds upstream NTP server settings
@@ -124,6 +128,15 @@ type SecurityConfig struct {
 
 	// Clock step settings
 	ClockStep ClockStepConfig `yaml:"clock_step"`
+
+	// Fuzzing settings
+	Fuzzing FuzzingConfig `yaml:"fuzzing"`
+}
+
+// FuzzingConfig for client fuzzing
+type FuzzingConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Mode    string `yaml:"mode"` // "random", "deterministic"
 }
 
 // TimeSpoofingConfig for time spoofing attack
@@ -218,6 +231,7 @@ func DefaultConfig() *Config {
 			NTPVersion:       4,
 			Stratum:          2,
 			SNTPMode:         false,
+			Timezone:         "UTC",
 		},
 		Upstream: UpstreamConfig{
 			Servers: []UpstreamServer{
@@ -264,6 +278,10 @@ func DefaultConfig() *Config {
 				Enabled:  false,
 				StepSecs: 3600,
 				Interval: 5,
+			},
+			Fuzzing: FuzzingConfig{
+				Enabled: false,
+				Mode:    "random",
 			},
 		},
 		Logging: LoggingConfig{
@@ -328,6 +346,14 @@ func DefaultConfig() *Config {
 				Config: map[string]interface{}{
 					"code":     "DENY",
 					"interval": 0,
+				},
+			},
+			{
+				Name:        "Random Fuzzing",
+				Description: "Continuous random protocol fuzzing (Client Robustness Test)",
+				Attack:      "fuzzing",
+				Config: map[string]interface{}{
+					"mode": "random",
 				},
 			},
 		},

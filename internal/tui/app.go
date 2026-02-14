@@ -173,7 +173,7 @@ func (a *App) createDashboardView() {
 		AddItem(attackStatus, 0, 1, false)
 
 	a.dashboardView = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(topRow, 8, 0, false).
+		AddItem(topRow, 11, 0, false).
 		AddItem(middleRow, 8, 0, false).
 		AddItem(quickLog, 0, 1, false)
 
@@ -200,16 +200,25 @@ func (a *App) updateDashboardPanel(serverStatus, upstreamStatus, statsPanel, cli
   Listen: [cyan]%s[white]
   Port: [cyan]%d[white]
   Interface: [cyan]%s[white]
+  Timezone: [cyan]%s[white]
   Max Clients: [cyan]%d[white]`,
 			a.server.GetListenAddress(),
 			a.cfg.Server.Port,
 			orDefault(a.cfg.Server.Interface, "all"),
+			orDefault(a.cfg.Server.Timezone, "UTC"),
 			a.cfg.Server.MaxClients))
 	} else {
-		serverStatus.SetText(`
+		serverStatus.SetText(fmt.Sprintf(`
   [red]● STOPPED[white]
   
-  Press [yellow]F10[white] to start server`)
+  Port: [gray]%d[white]
+  Interface: [gray]%s[white]
+  Timezone: [gray]%s[white]
+  
+  Press [yellow]F10[white] to start server`,
+			a.cfg.Server.Port,
+			orDefault(a.cfg.Server.Interface, "all"),
+			orDefault(a.cfg.Server.Timezone, "UTC")))
 	}
 
 	// Upstream status
@@ -601,6 +610,8 @@ func (a *App) selectAttack(info attacks.AttackInfo) {
 		a.cfg.Security.Rollover.Enabled = true
 	case attacks.AttackClockStep:
 		a.cfg.Security.ClockStep.Enabled = true
+	case attacks.AttackFuzzing:
+		a.cfg.Security.Fuzzing.Enabled = true
 	}
 
 	a.log.Infof("ATTACK", "Enabled attack: %s - %s", info.Name, info.Description)

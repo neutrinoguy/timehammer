@@ -34,6 +34,7 @@ The authors are not responsible for misuse of this tool.
 - **Multiple Interfaces**: Bind to specific network interfaces
 - **Upstream Sync**: Sync with public NTP servers (time.google.com, etc.)
 - **Multi-client**: Support for 50-100+ concurrent clients
+- **Timezone Support**: Configure server to respond with local time offsets (e.g., "America/New_York")
 
 ### Security Testing Mode 🔓
 - **Time Spoofing** - Send fake time to clients (future/past)
@@ -43,6 +44,7 @@ The authors are not responsible for misuse of this tool.
 - **Leap Second Injection** - Test leap second handling bugs
 - **Timestamp Rollover** - Y2K38 and NTP Era 1 testing
 - **Clock Step Attack** - Sudden large time jumps
+- **Client Fuzzing** - Randomly mutate NTP fields to test robustness
 
 ### Logging & Export
 - Real-time log viewer in TUI
@@ -125,6 +127,7 @@ server:
   max_clients: 100
   ntp_version: 4
   stratum: 2
+  timezone: "UTC"        # IANA Timezone (e.g. America/New_York)
 
 upstream:
   servers:
@@ -188,6 +191,12 @@ Send timestamps near rollover boundaries:
 Sudden large time jumps. Tests:
 - Step vs slew behavior
 - Application resilience
+
+### Client Fuzzing
+Randomly mutates NTP protocol fields to test client stability and error handling:
+- **Header Fuzzing**: Invalid versions, modes, stratums
+- **Timestamp Fuzzing**: Zero, max, mismatching timestamps
+- **Logic Fuzzing**: Invalid poll intervals, precision, root delay
 
 ## 📁 File Structure
 

@@ -224,7 +224,8 @@ func (s *Server) processRequest(data []byte, clientAddr *net.UDPAddr) {
 	// Update stats
 	atomic.AddUint64(&s.stats.TotalRequests, 1)
 	s.stats.mu.Lock()
-	s.stats.ActiveClients[clientStr] = time.Now()
+	// Use IP mainly to track unique clients (ignoring ephemeral ports)
+	s.stats.ActiveClients[clientAddr.IP.String()] = time.Now()
 	s.stats.mu.Unlock()
 
 	// Create fingerprint for logging
@@ -242,6 +243,19 @@ func (s *Server) processRequest(data []byte, clientAddr *net.UDPAddr) {
 
 	// Get current time from upstream
 	currentTime := s.upstream.GetCurrentTime()
+
+	// Apply configured timezone offset if set
+	// This shifts the UTC time to match the wall clock time of the target timezone
+	if s.cfg.Server.Timezone != "" && s.cfg.Server.Timezone != "UTC" {
+		loc, err := time.LoadLocation(s.cfg.Server.Timezone)
+		if err == nil {
+			_, offset := currentTime.In(loc).Zone()
+			currentTime = currentTime.Add(time.Duration(offset) * time.Second)
+		} else {
+			// Only log error occasionally or debug to avoid flooding
+			s.log.Debugf("SERVER", "Failed to load timezone %s: %v", s.cfg.Server.Timezone, err)
+		}
+	}
 	receiveTime := time.Now()
 
 	// Create response packet
