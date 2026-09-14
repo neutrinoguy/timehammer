@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/neutrinoguy/timehammer/internal/config"
+	"github.com/neutrinoguy/timehammer/internal/fuzzing"
 	"github.com/neutrinoguy/timehammer/internal/logger"
 	"github.com/neutrinoguy/timehammer/pkg/ntpcore"
 )
@@ -94,11 +95,15 @@ func GetAvailableAttacks() []AttackInfo {
 
 // AttackEngine handles attack execution
 type AttackEngine struct {
-	mu           sync.RWMutex
-	cfg          *config.Config
-	log          *logger.Logger
-	driftState   *DriftState
-	requestCount map[string]int // per-client request count for interval-based attacks
+	mu                 sync.RWMutex
+	cfg                *config.Config
+	log                *logger.Logger
+	driftState         *DriftState
+	requestCount       map[string]int // per-client request count for interval-based attacks
+	lastFuzzResponse   map[string]*ntpcore.NTPPacket
+	lastFuzzMutation   map[string]string
+	lastClientActivity map[string]time.Time
+	fuzzMonitorStop    chan struct{}
 }
 
 // DriftState tracks gradual drift
@@ -110,12 +115,18 @@ type DriftState struct {
 
 // NewAttackEngine creates a new attack engine
 func NewAttackEngine(cfg *config.Config) *AttackEngine {
-	return &AttackEngine{
-		cfg:          cfg,
-		log:          logger.GetLogger(),
-		driftState:   &DriftState{StartTime: time.Now()},
-		requestCount: make(map[string]int),
+	engine := &AttackEngine{
+		cfg:                cfg,
+		log:                logger.GetLogger(),
+		driftState:         &DriftState{StartTime: time.Now()},
+		requestCount:       make(map[string]int),
+		lastFuzzResponse:   make(map[string]*ntpcore.NTPPacket),
+		lastFuzzMutation:   make(map[string]string),
+		lastClientActivity: make(map[string]time.Time),
+		fuzzMonitorStop:    make(chan struct{}),
 	}
+	go engine.startFuzzInactivityMonitor()
+	return engine
 }
 
 // UpdateConfig updates the attack engine configuration
@@ -152,6 +163,7 @@ func (e *AttackEngine) ProcessPacket(packet *ntpcore.NTPPacket, clientAddr strin
 	// Track request count for this client
 	e.requestCount[clientAddr]++
 	count := e.requestCount[clientAddr]
+	e.lastClientActivity[clientAddr] = time.Now()
 
 	attack := AttackType(e.cfg.Security.ActiveAttack)
 
@@ -171,7 +183,12 @@ func (e *AttackEngine) ProcessPacket(packet *ntpcore.NTPPacket, clientAddr strin
 	case AttackClockStep:
 		return e.applyClockStep(packet, realTime, count)
 	case AttackFuzzing:
-		return e.applyFuzzing(packet)
+		fuzzed, mutation := e.applyFuzzing(packet)
+		if mutation != "" {
+			e.lastFuzzResponse[clientAddr] = fuzzed
+			e.lastFuzzMutation[clientAddr] = mutation
+		}
+		return fuzzed, mutation
 	default:
 		return packet, ""
 	}
@@ -548,4 +565,56 @@ func (e *AttackEngine) applyFuzzing(packet *ntpcore.NTPPacket) (*ntpcore.NTPPack
 
 	e.log.LogAttack(string(AttackFuzzing), "all", mutationName)
 	return packet, mutationName
+}
+
+func (e *AttackEngine) startFuzzInactivityMonitor() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-e.fuzzMonitorStop:
+			return
+		case <-ticker.C:
+			e.checkClientInactivity()
+		}
+	}
+}
+
+func (e *AttackEngine) checkClientInactivity() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.cfg.Security.Enabled || AttackType(e.cfg.Security.ActiveAttack) != AttackFuzzing {
+		return
+	}
+
+	timeoutSecs := e.cfg.Security.Fuzzing.InactivityTimeoutSecs
+	if timeoutSecs <= 0 {
+		timeoutSecs = 10
+	}
+	timeoutDuration := time.Duration(timeoutSecs) * time.Second
+
+	now := time.Now()
+	for clientAddr, lastSeen := range e.lastClientActivity {
+		if lastResp, exists := e.lastFuzzResponse[clientAddr]; exists {
+			inactiveTime := now.Sub(lastSeen)
+			if inactiveTime >= timeoutDuration {
+				mutation := e.lastFuzzMutation[clientAddr]
+				e.log.Errorf("CLIENT_FUZZING", "CLIENT CRASH DETECTED: Client %s stopped sending NTP requests for %v after receiving fuzzed response payload (%s)", clientAddr, inactiveTime.Round(time.Second), mutation)
+
+				rawBytes := lastResp.Bytes()
+				report, err := fuzzing.SaveCrashReport("client_crash", clientAddr, mutation, rawBytes, lastResp, inactiveTime)
+				if err != nil {
+					e.log.Errorf("CLIENT_FUZZING", "Failed to save client crash report: %v", err)
+				} else {
+					e.log.Infof("CLIENT_FUZZING", "Recorded unique client crash report: %s", report.ID)
+				}
+
+				// Remove from map to avoid duplicate crash triggers for same incident
+				delete(e.lastFuzzResponse, clientAddr)
+				delete(e.lastFuzzMutation, clientAddr)
+			}
+		}
+	}
 }

@@ -131,12 +131,26 @@ type SecurityConfig struct {
 
 	// Fuzzing settings
 	Fuzzing FuzzingConfig `yaml:"fuzzing"`
+
+	// Server Fuzzing settings (TimeHammer as Client)
+	ServerFuzzing ServerFuzzingConfig `yaml:"server_fuzzing"`
 }
 
 // FuzzingConfig for client fuzzing
 type FuzzingConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Mode    string `yaml:"mode"` // "random", "deterministic"
+	Enabled               bool   `yaml:"enabled"`
+	Mode                  string `yaml:"mode"`                    // "random", "deterministic"
+	InactivityTimeoutSecs int    `yaml:"inactivity_timeout_secs"` // Default 10s
+}
+
+// ServerFuzzingConfig for server fuzzing mode (TimeHammer as Client)
+type ServerFuzzingConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	Target           string `yaml:"target"`             // "host:port"
+	FuzzIntervalMs   int    `yaml:"fuzz_interval_ms"`   // Delay between fuzzed client requests
+	ProbeIntervalSec int    `yaml:"probe_interval_sec"` // Health probe interval
+	MaxProbeFailures int    `yaml:"max_probe_failures"` // Failures before triggering crash report
+	Mode             string `yaml:"mode"`               // "rfc_standards", "malformed_headers", "timestamp_overflow", "all"
 }
 
 // TimeSpoofingConfig for time spoofing attack
@@ -280,8 +294,17 @@ func DefaultConfig() *Config {
 				Interval: 5,
 			},
 			Fuzzing: FuzzingConfig{
-				Enabled: false,
-				Mode:    "random",
+				Enabled:               false,
+				Mode:                  "random",
+				InactivityTimeoutSecs: 10,
+			},
+			ServerFuzzing: ServerFuzzingConfig{
+				Enabled:          false,
+				Target:           "127.0.0.1:123",
+				FuzzIntervalMs:   200,
+				ProbeIntervalSec: 2,
+				MaxProbeFailures: 3,
+				Mode:             "all",
 			},
 		},
 		Logging: LoggingConfig{

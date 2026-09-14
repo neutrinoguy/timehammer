@@ -21,10 +21,10 @@ const (
 	NTPPacketMaxSize = 68 // With optional authentication
 
 	// Leap Indicator values
-	LeapNoWarning     = 0 // No warning
-	LeapLastMinute61  = 1 // Last minute of day has 61 seconds
-	LeapLastMinute59  = 2 // Last minute of day has 59 seconds
-	LeapAlarm         = 3 // Alarm condition (clock not synchronized)
+	LeapNoWarning    = 0 // No warning
+	LeapLastMinute61 = 1 // Last minute of day has 61 seconds
+	LeapLastMinute59 = 2 // Last minute of day has 59 seconds
+	LeapAlarm        = 3 // Alarm condition (clock not synchronized)
 
 	// Mode values
 	ModeReserved         = 0
@@ -41,20 +41,20 @@ const (
 	VersionNTPv4 = 4
 
 	// Kiss-of-Death codes (ASCII in Reference ID)
-	KoDACSTDeny    = "ACST" // The association belongs to a anycast server
-	KoDAuthFail    = "AUTH" // Server authentication failed
-	KoDAuto        = "AUTO" // Autokey sequence failed
-	KoDBcst        = "BCST" // The association belongs to a broadcast server
-	KoDCryp        = "CRYP" // Cryptographic authentication or identification failed
-	KoDDeny        = "DENY" // Access denied by remote server
-	KoDDrop        = "DROP" // Lost peer in symmetric mode
-	KoDRstr        = "RSTR" // Access denied due to local policy
-	KoDInit        = "INIT" // The association has not yet synchronized for the first time
-	KoDMcst        = "MCST" // The association belongs to a dynamically discovered server
-	KoDNkey        = "NKEY" // No key found
-	KoDRate        = "RATE" // Rate exceeded
-	KoDRmot        = "RMOT" // Alteration of association from a remote host running ntpdc
-	KoDStep        = "STEP" // A step change in system time has occurred
+	KoDACSTDeny = "ACST" // The association belongs to a anycast server
+	KoDAuthFail = "AUTH" // Server authentication failed
+	KoDAuto     = "AUTO" // Autokey sequence failed
+	KoDBcst     = "BCST" // The association belongs to a broadcast server
+	KoDCryp     = "CRYP" // Cryptographic authentication or identification failed
+	KoDDeny     = "DENY" // Access denied by remote server
+	KoDDrop     = "DROP" // Lost peer in symmetric mode
+	KoDRstr     = "RSTR" // Access denied due to local policy
+	KoDInit     = "INIT" // The association has not yet synchronized for the first time
+	KoDMcst     = "MCST" // The association belongs to a dynamically discovered server
+	KoDNkey     = "NKEY" // No key found
+	KoDRate     = "RATE" // Rate exceeded
+	KoDRmot     = "RMOT" // Alteration of association from a remote host running ntpdc
+	KoDStep     = "STEP" // A step change in system time has occurred
 )
 
 // NTPPacket represents an NTP packet as defined in RFC 5905
@@ -90,12 +90,12 @@ type NTPTimestamp struct {
 func TimeToNTPTimestamp(t time.Time) NTPTimestamp {
 	// Get Unix timestamp
 	secs := t.Unix() + NTPEpochOffset
-	
+
 	// Calculate fraction (nanoseconds to NTP fraction)
 	// NTP fraction is 2^32 / 10^9 of nanosecond
 	nanos := t.Nanosecond()
 	frac := uint32((float64(nanos) / 1e9) * float64(1<<32))
-	
+
 	return NTPTimestamp{
 		Seconds:  uint32(secs),
 		Fraction: frac,
@@ -116,8 +116,8 @@ func NewPacket() *NTPPacket {
 		Version:       VersionNTPv4,
 		Mode:          ModeServer,
 		Stratum:       2,
-		Poll:          6,         // 64 seconds
-		Precision:     -20,       // ~1 microsecond
+		Poll:          6,   // 64 seconds
+		Precision:     -20, // ~1 microsecond
 		RootDelay:     0,
 		RootDisp:      0,
 		ReferenceID:   0,
@@ -131,7 +131,7 @@ func ParsePacket(data []byte) (*NTPPacket, error) {
 	}
 
 	p := &NTPPacket{}
-	
+
 	// Parse first byte
 	firstByte := data[0]
 	p.LeapIndicator = (firstByte >> 6) & 0x03

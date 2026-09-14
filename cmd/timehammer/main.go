@@ -6,13 +6,16 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/neutrinoguy/timehammer/internal/config"
+	"github.com/neutrinoguy/timehammer/internal/fuzzing"
 	"github.com/neutrinoguy/timehammer/internal/logger"
 	"github.com/neutrinoguy/timehammer/internal/server"
 	"github.com/neutrinoguy/timehammer/internal/tui"
@@ -20,7 +23,7 @@ import (
 
 const (
 	AppName    = "TimeHammer"
-	AppVersion = "1.0.3"
+	AppVersion = "1.0.4"
 	AppDesc    = "NTP Security Testing Tool for IoT/Embedded Devices"
 )
 
@@ -29,6 +32,10 @@ var (
 	showHelp    = flag.Bool("help", false, "Show help information")
 	headless    = flag.Bool("headless", false, "Run in headless mode (no TUI)")
 	configPath  = flag.String("config", "", "Path to configuration file")
+	fuzzServer  = flag.Bool("fuzz-server", false, "Run NTP Server Fuzzing mode (TimeHammer as Client)")
+	targetAddr  = flag.String("target", "", "Target NTP Server address for fuzzing/replay (host:port)")
+	replayCrash = flag.String("replay", "", "Replay payload from specified crash JSON file or ID")
+	listCrashes = flag.Bool("list-crashes", false, "List recorded crash artifacts")
 )
 
 func main() {
@@ -76,13 +83,27 @@ func main() {
 	log.Info("STARTUP", fmt.Sprintf("%s v%s starting...", AppName, AppVersion))
 	log.Infof("STARTUP", "OS: %s", config.GetOSInfo())
 
+	// Handle listing crashes flag
+	if *listCrashes {
+		handleListCrashes()
+		os.Exit(0)
+	}
+
+	// Handle replay flag
+	if *replayCrash != "" {
+		handleReplayCrash(*replayCrash, *targetAddr)
+		os.Exit(0)
+	}
+
 	// Create server
 	srv := server.NewServer(cfg)
 
 	// Print warning
 	printWarning()
 
-	if *headless {
+	if *fuzzServer {
+		handleRunServerFuzzer(cfg, *targetAddr)
+	} else if *headless {
 		// Headless mode
 		runHeadless(srv, cfg, log)
 	} else {
@@ -132,6 +153,87 @@ func runHeadless(srv *server.Server, cfg *config.Config, log *logger.Logger) {
 	fmt.Println("👋 Goodbye!")
 }
 
+func handleListCrashes() {
+	crashes, err := fuzzing.ListCrashReports()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing crash reports: %v\n", err)
+		return
+	}
+
+	if len(crashes) == 0 {
+		fmt.Println("No crash reports found in .timehammer/crashes/")
+		return
+	}
+
+	fmt.Printf("🔍 Found %d crash report(s):\n\n", len(crashes))
+	for i, c := range crashes {
+		fmt.Printf("%d) ID: %s | Type: %s | Target: %s\n", i+1, c.ID, c.Type, c.TargetAddress)
+		fmt.Printf("   Timestamp: %s | Mutation: %s\n", c.Timestamp.Format(time.RFC3339), c.FuzzMutation)
+		fmt.Printf("   Payload Hex: %s\n\n", c.PacketHex)
+	}
+}
+
+func handleReplayCrash(crashIDOrPath, targetOverride string) {
+	report, err := fuzzing.LoadCrashReport(crashIDOrPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading crash report: %v\n", err)
+		os.Exit(1)
+	}
+
+	target := report.TargetAddress
+	if targetOverride != "" {
+		target = targetOverride
+	}
+
+	if target == "" {
+		fmt.Fprintf(os.Stderr, "Error: No target address specified in crash report or CLI arguments.\n")
+		os.Exit(1)
+	}
+
+	rawBytes, err := hex.DecodeString(report.PacketHex)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding payload hex: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("⚡ Replaying crash payload [%s] (%s) to target %s...\n", report.ID, report.FuzzMutation, target)
+	resp, err := fuzzing.ReplayPayload(target, rawBytes, 3*time.Second)
+	if err != nil {
+		fmt.Printf("❌ Target did not respond or timed out: %v\n", err)
+		fmt.Println("   (Target remote NTP server appears to be CRASHED / UNRESPONSIVE)")
+	} else {
+		fmt.Printf("✅ Target responded with %d bytes!\n", len(resp))
+	}
+}
+
+func handleRunServerFuzzer(cfg *config.Config, targetOverride string) {
+	if targetOverride != "" {
+		cfg.Security.ServerFuzzing.Target = targetOverride
+	}
+
+	if cfg.Security.ServerFuzzing.Target == "" {
+		fmt.Fprintf(os.Stderr, "Error: Target address is required for Server Fuzzing (use --target host:port)\n")
+		os.Exit(1)
+	}
+
+	fuzzer := fuzzing.NewServerFuzzer(cfg)
+	if err := fuzzer.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting server fuzzer: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("🚀 NTP Server Fuzzer running against %s...\n", cfg.Security.ServerFuzzing.Target)
+	fmt.Println("Press Ctrl+C to stop...")
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	<-sigChan
+
+	fmt.Println("\n🛑 Stopping Server Fuzzer...")
+	fuzzer.Stop()
+}
+
 func printBanner() {
 	banner := `
 ╔════════════════════════════════════════════════════════════════╗
@@ -149,7 +251,7 @@ func printBanner() {
 ║   ██║  ██║██║  ██║██║ ╚═╝ ██║██║ ╚═╝ ██║███████╗██║  ██║      ║
 ║   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ║
 ║                                                                ║
-║              NTP Security Testing Tool v1.0.0                  ║
+║              NTP Security Testing Tool v1.0.4                  ║
 ║         For IoT, IIoT, and Embedded Device Testing            ║
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
@@ -187,24 +289,29 @@ USAGE:
     timehammer [OPTIONS]
 
 OPTIONS:
-    --help          Show this help message
-    --version       Show version information
-    --headless      Run in headless mode (no TUI)
-    --config PATH   Use specific configuration file
+    --help                 Show this help message
+    --version              Show version information
+    --headless             Run in headless mode (no TUI)
+    --config PATH          Use specific configuration file
+    --fuzz-server          Run NTP Server Fuzzing mode (TimeHammer as Client)
+    --target HOST:PORT     Target NTP Server address for fuzzing or payload replay
+    --replay CRASH_FILE    Replay fuzzed payload from crash JSON file or ID
+    --list-crashes         List all recorded fuzzing crash artifacts
 
 KEYBOARD SHORTCUTS (TUI Mode):
-    F1              Dashboard
-    F2              View Logs
-    F3              Edit Configuration
-    F4              Attack Mode / Security Testing
-    F5              Session Management
-    F10             Start/Stop Server
-    F12 / Esc       Quit
-    Ctrl+S          Save Configuration
-    Ctrl+E          Export Logs (JSON & CSV)
-    Ctrl+R          Toggle Session Recording
-    Ctrl+U          Force Upstream Sync
-    ?               Show Help
+    F1                     Dashboard
+    F2                     View Logs
+    F3                     Edit Configuration
+    F4                     Attack Mode / Security Testing
+    F5                     Session Management
+    F6                     Server Fuzzing Mode
+    F10                    Start/Stop Server
+    F12 / Esc              Quit
+    Ctrl+S                 Save Configuration
+    Ctrl+E                 Export Logs (JSON & CSV)
+    Ctrl+R                 Toggle Session Recording
+    Ctrl+U                 Force Upstream Sync
+    ?                      Show Help
 
 SECURITY ATTACKS:
     - Time Spoofing: Send fake time to clients
@@ -214,12 +321,15 @@ SECURITY ATTACKS:
     - Leap Second: Inject leap second flags
     - Rollover: Test Y2K38 and NTP era bugs
     - Clock Step: Sudden large time jumps
+    - Client Fuzzing: Rate-monitored mutation with crash logging & replay
+    - Server Fuzzing: Target server mutation with health probes & crash recording
 
 FILES:
-    ./..timehammer/config.yaml     Configuration file
-    ./..timehammer/timehammer.log  Log file
-    ./..timehammer/sessions/       Session recordings
-    ./..timehammer/exports/        Exported logs (JSON/CSV)
+    ./.timehammer/config.yaml     Configuration file
+    ./.timehammer/timehammer.log  Log file
+    ./.timehammer/sessions/       Session recordings
+    ./.timehammer/crashes/        Fuzzing crash reports
+    ./.timehammer/exports/        Exported logs (JSON/CSV)
 
 EXAMPLES:
     # Run with TUI (default)
@@ -228,8 +338,14 @@ EXAMPLES:
     # Run in headless mode
     timehammer --headless
 
-    # Use specific config
-    timehammer --config /path/to/config.yaml
+    # Fuzz a remote NTP Server (TimeHammer as Client)
+    timehammer --fuzz-server --target 192.168.1.50:123
+
+    # Replay a recorded crash against target
+    timehammer --replay crash_client_crash_1773469324.json --target 192.168.1.50:123
+
+    # List recorded crash reports
+    timehammer --list-crashes
 
 For more information, visit: https://github.com/neutrinoguy/timehammer
 `, AppName, AppVersion, AppDesc)

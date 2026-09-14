@@ -11,6 +11,7 @@ import (
 
 	"github.com/neutrinoguy/timehammer/internal/attacks"
 	"github.com/neutrinoguy/timehammer/internal/config"
+	"github.com/neutrinoguy/timehammer/internal/fuzzing"
 	"github.com/neutrinoguy/timehammer/internal/logger"
 	"github.com/neutrinoguy/timehammer/internal/server"
 	"github.com/neutrinoguy/timehammer/internal/session"
@@ -37,16 +38,18 @@ type App struct {
 	recorder *session.SessionRecorder
 
 	// UI Components
-	mainFlex      *tview.Flex
-	header        *tview.TextView
-	footer        *tview.TextView
-	statusBar     *tview.TextView
-	logView       *tview.TextView
-	dashboardView *tview.Flex
-	configEditor  *tview.TextArea
-	attackPanel   *tview.Flex
-	helpModal     *tview.Modal
-	sessionPanel  *tview.Flex
+	mainFlex        *tview.Flex
+	header          *tview.TextView
+	footer          *tview.TextView
+	statusBar       *tview.TextView
+	logView         *tview.TextView
+	dashboardView   *tview.Flex
+	configEditor    *tview.TextArea
+	attackPanel     *tview.Flex
+	helpModal       *tview.Modal
+	sessionPanel    *tview.Flex
+	serverFuzzPanel *tview.Flex
+	serverFuzzer    *fuzzing.ServerFuzzer
 
 	// State
 	currentPage string
@@ -56,12 +59,13 @@ type App struct {
 // NewApp creates a new TUI application
 func NewApp(cfg *config.Config, srv *server.Server) *App {
 	a := &App{
-		app:      tview.NewApplication(),
-		pages:    tview.NewPages(),
-		cfg:      cfg,
-		server:   srv,
-		log:      logger.GetLogger(),
-		recorder: session.GetRecorder(),
+		app:          tview.NewApplication(),
+		pages:        tview.NewPages(),
+		cfg:          cfg,
+		server:       srv,
+		log:          logger.GetLogger(),
+		recorder:     session.GetRecorder(),
+		serverFuzzer: fuzzing.NewServerFuzzer(cfg),
 	}
 
 	a.setupUI()
@@ -82,7 +86,7 @@ func (a *App) setupUI() {
 	a.footer = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
-	a.footer.SetText(" [yellow]F1[white] Dashboard │ [yellow]F2[white] Logs │ [yellow]F3[white] Config │ [yellow]F4[white] Attacks │ [yellow]F5[white] Sessions │ [yellow]F10[white] Start/Stop │ [yellow]F12[white] Quit │ [yellow]?[white] Help ")
+	a.footer.SetText(" [yellow]F1[white] Dash │ [yellow]F2[white] Logs │ [yellow]F3[white] Config │ [yellow]F4[white] Attacks │ [yellow]F5[white] Sessions │ [yellow]F6[white] Server Fuzz │ [yellow]F10[white] Start/Stop │ [yellow]F12[white] Quit ")
 	a.footer.SetBackgroundColor(tcell.ColorDarkSlateGray)
 
 	// Create status bar
@@ -96,6 +100,7 @@ func (a *App) setupUI() {
 	a.createConfigEditor()
 	a.createAttackPanel()
 	a.createSessionPanel()
+	a.createServerFuzzPanel()
 	a.createHelpModal()
 
 	// Add pages
@@ -104,6 +109,7 @@ func (a *App) setupUI() {
 	a.pages.AddPage("config", a.configEditor, true, false)
 	a.pages.AddPage("attacks", a.attackPanel, true, false)
 	a.pages.AddPage("sessions", a.sessionPanel, true, false)
+	a.pages.AddPage("server_fuzz", a.serverFuzzPanel, true, false)
 
 	// Create main layout
 	a.mainFlex = tview.NewFlex().SetDirection(tview.FlexRow).
@@ -508,6 +514,91 @@ func (a *App) createSessionPanel() {
 		AddItem(sessionDetails, 0, 1, false)
 }
 
+// createServerFuzzPanel creates the NTP Server Fuzzing panel
+func (a *App) createServerFuzzPanel() {
+	statusView := tview.NewTextView().SetDynamicColors(true)
+	statusView.SetBorder(true)
+	statusView.SetTitle(" 🚀 Server Fuzzer Status ")
+	statusView.SetBorderColor(ColorDanger)
+
+	form := tview.NewForm().
+		AddInputField("Target (Host:Port)", a.cfg.Security.ServerFuzzing.Target, 30, nil, func(text string) {
+			a.cfg.Security.ServerFuzzing.Target = text
+		}).
+		AddDropDown("Mode", []string{"all", "rfc_standards", "malformed_headers", "timestamp_overflow"}, 0, func(option string, index int) {
+			a.cfg.Security.ServerFuzzing.Mode = option
+		}).
+		AddInputField("Fuzz Interval (ms)", fmt.Sprintf("%d", a.cfg.Security.ServerFuzzing.FuzzIntervalMs), 10, tview.InputFieldInteger, func(text string) {
+			var v int
+			if _, err := fmt.Sscanf(text, "%d", &v); err == nil && v > 0 {
+				a.cfg.Security.ServerFuzzing.FuzzIntervalMs = v
+			}
+		}).
+		AddInputField("Probe Interval (s)", fmt.Sprintf("%d", a.cfg.Security.ServerFuzzing.ProbeIntervalSec), 10, tview.InputFieldInteger, func(text string) {
+			var v int
+			if _, err := fmt.Sscanf(text, "%d", &v); err == nil && v > 0 {
+				a.cfg.Security.ServerFuzzing.ProbeIntervalSec = v
+			}
+		}).
+		AddInputField("Max Probe Failures", fmt.Sprintf("%d", a.cfg.Security.ServerFuzzing.MaxProbeFailures), 10, tview.InputFieldInteger, func(text string) {
+			var v int
+			if _, err := fmt.Sscanf(text, "%d", &v); err == nil && v > 0 {
+				a.cfg.Security.ServerFuzzing.MaxProbeFailures = v
+			}
+		}).
+		AddButton("Start Fuzzing", func() {
+			if !a.serverFuzzer.IsRunning() {
+				if err := a.serverFuzzer.Start(); err != nil {
+					a.log.Errorf("SERVER_FUZZER", "Failed to start: %v", err)
+				}
+			}
+		}).
+		AddButton("Stop Fuzzing", func() {
+			if a.serverFuzzer.IsRunning() {
+				a.serverFuzzer.Stop()
+			}
+		})
+
+	form.SetBorder(true)
+	form.SetTitle(" ⚙️ Fuzzer Configuration ")
+	form.SetBorderColor(ColorPrimary)
+
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			a.app.QueueUpdateDraw(func() {
+				stats := a.serverFuzzer.GetStats()
+				statusColor := "green"
+				if stats.Status == "Stopped" {
+					statusColor = "yellow"
+				} else if stats.Status == "Crash Detected" {
+					statusColor = "red"
+				}
+
+				statusView.SetText(fmt.Sprintf(`
+  Status: [%s]%s[white]
+  Target: [cyan]%s[white]
+  
+  Fuzz Packets Sent: [cyan]%d[white]
+  Health Probes Sent: [cyan]%d[white]
+  Probe Failures: [yellow]%d[white]
+  Crashes Found: [red]%d[white]
+  
+  [gray]Crashes are saved to .timehammer/crashes/[white]`, statusColor, stats.Status, a.cfg.Security.ServerFuzzing.Target, stats.FuzzSent, stats.ProbesSent, stats.ProbeFailures, stats.CrashesFound))
+			})
+		}
+	}()
+
+	leftPane := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(form, 0, 1, true)
+
+	a.serverFuzzPanel = tview.NewFlex().
+		AddItem(leftPane, 45, 0, true).
+		AddItem(statusView, 0, 1, false)
+}
+
 // refreshSessionList refreshes the session list
 func (a *App) refreshSessionList(sessionList *tview.List, sessionDetails *tview.TextView) {
 	sessionList.Clear()
@@ -566,6 +657,7 @@ func (a *App) createHelpModal() {
   F3         - Edit Configuration
   F4         - Attack Mode
   F5         - Session Management
+  F6         - Server Fuzzing Mode
   F10        - Start/Stop Server
   F12 / Esc  - Quit
 
@@ -634,6 +726,9 @@ func (a *App) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	case tcell.KeyF5:
 		a.switchPage("sessions")
+		return nil
+	case tcell.KeyF6:
+		a.switchPage("server_fuzz")
 		return nil
 	case tcell.KeyF10:
 		a.toggleServer()
@@ -786,11 +881,12 @@ func (a *App) confirmQuit() {
 // updateHeader updates the header text
 func (a *App) updateHeader() {
 	pageNames := map[string]string{
-		"dashboard": "Dashboard",
-		"logs":      "Logs",
-		"config":    "Configuration",
-		"attacks":   "Security Testing",
-		"sessions":  "Sessions",
+		"dashboard":   "Dashboard",
+		"logs":        "Logs",
+		"config":      "Configuration",
+		"attacks":     "Security Testing",
+		"sessions":    "Sessions",
+		"server_fuzz": "Server Fuzzing Mode",
 	}
 	pageName := pageNames[a.currentPage]
 

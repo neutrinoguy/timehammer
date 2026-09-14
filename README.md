@@ -31,7 +31,7 @@ The authors are not responsible for misuse of this tool.
 - **Standalone**: Creates its own data directory (`./.timehammer/`)
 - **NTP/SNTP Support**: Full RFC 5905 (NTPv4) and SNTP support
 - **Configurable Ports**: Standard port 123, custom ports, or auto-fallback
-- **Multiple Interfaces**: Bind to specific network interfaces
+- **Multiple Interfaces**: Bind to specific network interfaces by name (Windows adapter friendly names, Linux/macOS interface names) or IP
 - **Upstream Sync**: Sync with public NTP servers (time.google.com, etc.)
 - **Multi-client**: Support for 50-100+ concurrent clients
 - **Timezone Support**: Configure server to respond with local time offsets (e.g., "America/New_York")
@@ -44,11 +44,14 @@ The authors are not responsible for misuse of this tool.
 - **Leap Second Injection** - Test leap second handling bugs
 - **Timestamp Rollover** - Y2K38 and NTP Era 1 testing
 - **Clock Step Attack** - Sudden large time jumps
-- **Client Fuzzing** - Randomly mutate NTP fields to test robustness
+- **Client Fuzzing** - Randomly mutate NTP fields with rate-drop crash detection, recording, and replay
+- **Server Fuzzing** - Run TimeHammer as an NTP client to fuzz remote servers with active health probing and crash detection
 
 ### Logging & Export
 - Real-time log viewer in TUI
 - Client fingerprinting (implementation detection)
+- Fuzzing crash recording (`.json`) with auto-generated standalone Python replay boilerplate
+- CLI and TUI crash payload replay
 - JSON/CSV log export
 - Session recording and replay
 
@@ -98,6 +101,23 @@ GOOS=darwin GOARCH=arm64 go build -o timehammer-darwin-arm64 ./cmd/timehammer
 ./timehammer --headless
 ```
 
+### Server Fuzzing Mode (TimeHammer as Client)
+
+```bash
+# Fuzz a remote NTP server from CLI
+./timehammer --fuzz-server --target 192.168.1.50:123
+```
+
+### Fuzzing Crash Management & Replay
+
+```bash
+# List all recorded crash reports
+./timehammer --list-crashes
+
+# Replay a recorded crash against target
+./timehammer --replay crash_server_crash_1773469324000.json --target 192.168.1.50:123
+```
+
 ### Keyboard Shortcuts
 
 | Key | Action |
@@ -107,6 +127,7 @@ GOOS=darwin GOARCH=arm64 go build -o timehammer-darwin-arm64 ./cmd/timehammer
 | `F3` | Edit Configuration |
 | `F4` | Attack Mode / Security Testing |
 | `F5` | Session Management |
+| `F6` | Server Fuzzing Mode |
 | `F10` | Start/Stop Server |
 | `F12` / `Esc` | Quit |
 | `Ctrl+S` | Save Configuration |
@@ -121,7 +142,7 @@ Configuration is stored in `./.timehammer/config.yaml`:
 
 ```yaml
 server:
-  interface: ""           # Empty = all interfaces
+  interface: ""           # Empty = all interfaces, or adapter name (e.g. "Ethernet", "eth0")
   port: 123              # Standard NTP port
   alt_port: 1123         # Fallback if 123 is busy
   max_clients: 100
@@ -152,6 +173,17 @@ security:
   rollover:
     target_year: 2038
     mode: "y2k38"
+  fuzzing:
+    enabled: false
+    mode: "random"
+    inactivity_timeout_secs: 10   # Detect client crash when requests cease
+  server_fuzzing:
+    enabled: false
+    target: "127.0.0.1:123"
+    fuzz_interval_ms: 200
+    probe_interval_sec: 2
+    max_probe_failures: 3
+    mode: "all"
 ```
 
 ## 🔓 Security Attacks
@@ -197,6 +229,14 @@ Randomly mutates NTP protocol fields to test client stability and error handling
 - **Header Fuzzing**: Invalid versions, modes, stratums
 - **Timestamp Fuzzing**: Zero, max, mismatching timestamps
 - **Logic Fuzzing**: Invalid poll intervals, precision, root delay
+- **Rate-Drop Crash Detection**: Monitors client request interval; if requests cease after a fuzzed response (default 10s), logs a crash artifact with python replay boilerplate
+- **Replay Verification**: Replay saved crash packets directly using CLI or generated Python code
+
+### Server Fuzzing Mode
+Fuzz remote NTP/SNTP servers with TimeHammer acting as a client:
+- **Active Instrumentation**: Concurrently probes server health while transmitting fuzzed client requests
+- **Crash Detection**: Flags crash when consecutive health probes time out after sending a fuzz mutation
+- **Artifact Generation**: Saves payload and target parameters into `.timehammer/crashes/`
 
 ## 📁 File Structure
 
@@ -206,9 +246,12 @@ Randomly mutates NTP protocol fields to test client stability and error handling
 ├── timehammer.log       # Log file
 ├── sessions/            # Session recordings
 │   └── session_*.json
+├── crashes/             # Fuzzing crash artifacts & python boilerplate
+│   └── crash_*.json
 └── exports/             # Exported logs
     ├── logs_*.json
     └── logs_*.csv
+```
 ```
 
 ## 🔧 Troubleshooting

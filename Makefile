@@ -2,7 +2,7 @@
 # Cross-platform NTP Security Testing Tool
 
 BINARY_NAME=timehammer
-VERSION=1.0.2
+VERSION=1.0.4
 BUILD_DIR=build
 MAIN_PATH=./cmd/timehammer
 

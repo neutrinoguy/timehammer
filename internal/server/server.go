@@ -13,6 +13,7 @@ import (
 	"github.com/neutrinoguy/timehammer/internal/logger"
 	"github.com/neutrinoguy/timehammer/internal/ntp"
 	"github.com/neutrinoguy/timehammer/internal/session"
+	"github.com/neutrinoguy/timehammer/pkg/iface"
 	"github.com/neutrinoguy/timehammer/pkg/ntpcore"
 )
 
@@ -78,17 +79,23 @@ func (s *Server) Start() error {
 		return fmt.Errorf("server already running")
 	}
 
-	// Determine which port to use
+	// Determine which port and interface to use
 	port := s.cfg.Server.Port
-	iface := s.cfg.Server.Interface
+	ifaceInput := s.cfg.Server.Interface
+
+	bindIP, err := iface.ResolveInterfaceIP(ifaceInput)
+	if err != nil {
+		s.log.Warnf("SERVER", "Could not resolve interface '%s': %v. Falling back to all interfaces.", ifaceInput, err)
+		bindIP = ""
+	}
 
 	// Build address
-	addr := fmt.Sprintf("%s:%d", iface, port)
+	addr := fmt.Sprintf("%s:%d", bindIP, port)
 
 	// Try to bind
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
-		return fmt.Errorf("failed to resolve address: %w", err)
+		return fmt.Errorf("failed to resolve address %s: %w", addr, err)
 	}
 
 	conn, err := net.ListenUDP("udp", udpAddr)
@@ -97,7 +104,7 @@ func (s *Server) Start() error {
 		if s.cfg.Server.UseAltPortOnFail && port == s.cfg.Server.Port {
 			s.log.Warnf("SERVER", "Failed to bind to port %d, trying alt port %d", port, s.cfg.Server.AltPort)
 
-			altAddr := fmt.Sprintf("%s:%d", iface, s.cfg.Server.AltPort)
+			altAddr := fmt.Sprintf("%s:%d", bindIP, s.cfg.Server.AltPort)
 			altUdpAddr, _ := net.ResolveUDPAddr("udp", altAddr)
 
 			conn, err = net.ListenUDP("udp", altUdpAddr)
@@ -128,8 +135,8 @@ func (s *Server) Start() error {
 	s.wg.Add(1)
 	go s.cleanupClients()
 
-	s.log.Infof("SERVER", "NTP server started on %s:%d", iface, port)
-	if iface == "" {
+	s.log.Infof("SERVER", "NTP server started on %s:%d", ifaceInput, port)
+	if bindIP == "" {
 		s.log.Info("SERVER", "Listening on all interfaces")
 	}
 
